@@ -1,4 +1,5 @@
 from PyDAQmx.DAQmxCallBack import *
+from PyDAQmx import *
 from numpy import zeros
 
 # Class of the data object
@@ -17,7 +18,7 @@ def EveryNCallback_py(taskHandle, everyNsamplesEventType, nSamples, callbackData
     data = zeros(1000)
     DAQmxReadAnalogF64(taskHandle,1000,10.0,DAQmx_Val_GroupByScanNumber,data,1000,byref(read),None)
     callbackdata.extend(data.tolist())
-    print "Acquired total %d samples"%len(data)
+    print("Acquired total %d samples"%len(data))
     return 0 # The function should return an integer
 
 # Convert the python function to a C function callback
