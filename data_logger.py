@@ -1,6 +1,7 @@
 import pprint
 import nidaqmx
 import matplotlib.pyplot as plt
+import pandas as pd
 
 pp = pprint.PrettyPrinter(indent=4)
 
@@ -18,7 +19,7 @@ with nidaqmx.Task() as task:
     # plt.show()
 
 
-    task.timing.cfg_samp_clk_timing(5000,sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
+    task.timing.cfg_samp_clk_timing(1000,sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
 
     # Python 2.X does not have nonlocal keyword.
     non_local_var = {'samples': []}
@@ -27,7 +28,7 @@ with nidaqmx.Task() as task:
                  number_of_samples, callback_data):
         print('Every N Samples callback invoked.')
 
-        samples = task.read(number_of_samples_per_channel=1000)
+        samples = task.read(number_of_samples_per_channel=500)
         non_local_var['samples'].extend([samples])
 
         return 0
@@ -47,7 +48,11 @@ with nidaqmx.Task() as task:
             for ch0,ch1 in zip(record[0],record[1]):
                 f.write("%s\n" % "{}, {}".format(ch0,ch1))
 
-    # plt.figure()
-    # plt.plot(data[0])
-    # plt.plot(data[1])
-    # plt.show()
+    df = pd.read_csv('./log.csv', skiprows=1, header=None)
+    y = df[0].as_matrix()
+    x = df[1].as_matrix()
+
+    plt.figure()
+    plt.plot(x)
+    plt.plot(y)
+    plt.show()
