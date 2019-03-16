@@ -1,10 +1,18 @@
 #!/usr/bin/env python2.7
 # -*- coding: utf-8 -*-
+import matplotlib
+matplotlib.use('QT5Agg')
 import visa
 import time
 import binascii
+import time
+import data_logger as dl
+from threading import Thread
+import matplotlib.pyplot as plt
+# plt.switch_backend('agg')
 #USB resource of Device
 device_resource = "USB0::0xF4EC::0xEE38::SDG2XCAQ2R2647::INSTR"
+
 
 #Little endian, 16-bit 2's complement
 wave_points = [0x0010, 0x0020, 0x0030, 0x0040, 0x0050, 0x0060, 0x0070, 0xff7f]
@@ -54,19 +62,79 @@ def get_wave_data(dev):
     f.write(wave_data)
     f.close()
 
-def pulse(dev, width, period,inv=True):
-    # device.write("C1:BSWV WVTP,PULSE,WIDTH,5e-3,AMP,8V,OFST,4V,FRQ,10")
-    # device.write("C1:OUTP ON")
-    #
-    # device.write("C1:INVT OFF")
-    # device.write("C1:OUTP OFF")
-
-    dev.write("C1:BSWV WVTP,PULSE,2,PULSE,WIDTH,5E-2,AMP,2V")
+def pulse(dev, width, amp, offset, freq, hold,inv=True):
+    dev.write("C1:OUTP OFF")
+    dev.write("C1:BSWV WVTP,PULSE,WIDTH,{:.2E},AMP,{},OFST,{},FRQ,{:.2E}".format(width,amp,offset,freq))
     if inv:
         dev.write("C1:INVT ON")
     else:
         dev.write("C1:INVT OFF")
+    dev.write("C1:OUTP ON")
+    time.sleep(hold)
+    dev.write("C1:OUTP OFF")
 
+def basic_wave(dev,wave, width, amp, offset, freq, hold,dly=0,inv=True,chan='C1'):
+    dev.write("{}:OUTP OFF".format(chan))
+    dev.write("{}:OUTP LOAD, HZ".format(chan))
+    dev.write("{}:BSWV WVTP,{},WIDTH,{:.2E},AMP,{},OFST,{},FRQ,{:.2E},DLY,{:.2E}".format(chan,wave,width,amp,offset,freq,dly))
+    # dev.write("{}:BSWV WVTP,{},WIDTH,{:.2E},AMP,{},OFST,{},FRQ,{:.2E}".format(chan, wave, width, amp, offset, freq))
+    if inv:
+        dev.write("{}:INVT ON".format(chan))
+    else:
+        dev.write("{}:INVT OFF".format(chan))
+    dev.write("{}:OUTP ON".format(chan))
+
+    time.sleep(hold)
+    dev.write("{}:BSWV OFST,0,AMP,0")
+    dev.write("{}:OUTP OFF".format(chan))
+    dev.write("{}:INVT OFF".format(chan))
+
+def basic_wave_dual_ch(dev,wave1, width1, amp1, offset1, freq1, dly1,  \
+                       wave2, width2, amp2, offset2, freq2, dly2, hold, inv1=True, inv2=True):
+    dev.write("C1:OUTP OFF")
+    dev.write("C2:OUTP OFF")
+
+    dev.write("C1:BSWV WVTP,{},WIDTH,{:.2E},AMP,{},OFST,{},FRQ,{:.2E},DLY,{:.2E}".format(wave1,width1,amp1,offset1,freq1,dly1))
+    if inv1:
+        dev.write("C1:INVT ON")
+    else:
+        dev.write("C1:INVT OFF")
+
+    dev.write("C2:BSWV WVTP,{},WIDTH,{:.2E},AMP,{},OFST,{},FRQ,{:.2E},DLY,{:.2E}".format(wave2, width2, amp2, offset2, freq2, dly2))
+    if inv1:
+        dev.write("C2:INVT ON")
+    else:
+        dev.write("C2:INVT OFF")
+
+    dev.write("C1:OUTP ON")
+    dev.write("C2:OUTP ON")
+    time.sleep(hold)
+    dev.write("C1:OUTP OFF")
+    dev.write("C2:OUTP OFF")
+    dev.write("C1:INVT OFF")
+    dev.write("C2:INVT OFF")
+
+def npulses(dev, width, amp, offset, freq, N,inv=True):
+    dev.write("C1:OUTP OFF")
+    dev.write("C1:BSWV WVTP,PULSE,WIDTH,{:.2E},AMP,{},OFST,{},FRQ,{:.2E}".format(width,amp,offset,freq))
+    if inv:
+        dev.write("C1:INVT ON")
+    else:
+        dev.write("C1:INVT OFF")
+    dev.write("C1:OUTP ON")
+    hold=1./freq*N
+    time.sleep(hold)
+    dev.write("C1:OUTP OFF")
+    dev.write("C1:INVT OFF")
+
+def set_dc(dev,offset,hold):
+    dev.write("C1:BSWV WVTP,DC,OFST,{}".format(offset))
+    dev.write("C1:OUTP ON")
+    time.sleep(hold)
+    dev.write("C1:OUTP OFF")
+
+
+waves={'sin':'SINE', 'square':'SQUARE', 'ramp':'RAMP', 'pulse':'PULSE', 'noise':'NOISE'}
 
 if __name__ == '__main__':
     """"""
@@ -76,8 +144,76 @@ if __name__ == '__main__':
 
     print(device.query('*IDN?'))
 
-    device.write("C1:BSWV WVTP,PULSE,2,PULSE,WIDTH,5E-2,AMP,2V")
-    device.write("C1:INVT OFF")
+    # dev.write("C1:INVT OFF")
+    # dev.write("C1:OUTP ON")
+    # # dev.write("C1:BSWV WVTP,PULSE,WIDTH,0.003,AMP,5,OFST,0,FRQ,5")
+    # dev.write("C1:BSWV WVTP,PULSE,WIDTH,{:.2E},AMP,{},OFST,{},FRQ,{:.2E}".format(0.1, 5, 2.5, 0.6))
+
+    # npulses(device,width=0.03,amp=5,offset=2.5,freq=10,N=10,inv=False)
+    # npulses(device, width=0.002, amp=5, offset=2.5, freq=50, N=50, inv=False)
+
+    # dl.measure_for_time(1000,10)
+
+    srate=4000
+    Thread(target=dl.measure_for_time,args=[srate,32.]).start()
+
+    # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=2, inv=False, chan='C1', dly=0)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=True, chan='C1', dly=0)
+    basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=False, chan='C1', dly=0)
+    basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=True, chan='C1', dly=0)
+    basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=False, chan='C1', dly=0)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=True, chan='C1', dly=0)
+    # time.sleep(10)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=False, chan='C1', dly=0)
+    # basic_wave(device, 'PULSE', width=0.001, amp=1, offset=0.5, freq=0.5, hold=200, inv=True, chan='C1', dly=0)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=8, inv=False, chan='C1', dly=0)
+
+    # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=1, inv=True,chan='C1',dly=0)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4., offset=2., freq=5, hold=1, inv=False,chan='C1',dly=0)
+    # time.sleep(1)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=2, inv=True, chan='C1', dly=0)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4., offset=2., freq=5, hold=2, inv=False, chan='C1', dly=0)
+    # # time.sleep(2)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=4, inv=True, chan='C1', dly=0)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4., offset=2.0, freq=5, hold=4, inv=False, chan='C1', dly=0)
+    # time.sleep(4)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=8, inv=True, chan='C1', dly=0)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4., offset=2., freq=5, hold=8, inv=False, chan='C1', dly=0)
+    # time.sleep(4)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=2, inv=True, chan='C1', dly=0)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4., offset=2., freq=5, hold=2, inv=False, chan='C1', dly=0)
+    # # time.sleep(8)
+    # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=0.0, freq=5, hold=4, inv=True, chan='C1', dly=0)
+    # basic_wave(device, 'PULSE', width=0.5, amp=5, offset=2.5, freq=0.0001, hold=3, inv=True,chan='C1',dly=0)
+
+    # basic_wave(device, 'PULSE', width=0.003, amp=4, offset=2, freq=100, hold=0.5, inv=False)
+    # basic_wave(device, 'PULSE', width=0.0015, amp=2, offset=1, freq=100, hold=0.5, inv=True)
+    # basic_wave(device, 'PULSE', width=0.003, amp=4, offset=2, freq=100, hold=0.5, inv=False)
+    # basic_wave(device, 'SINE', width=0.003, amp=4, offset=0, freq=10, hold=1, inv=False)
+    # basic_wave(device, 'SINE', width=0.003, amp=4, offset=0, freq=20, hold=1, inv=False)
+    # basic_wave(device, 'SINE', width=0.003, amp=4, offset=0, freq=40, hold=1, inv=False)
+    # basic_wave(device, 'SINE', width=0.003, amp=4, offset=0, freq=80, hold=1, inv=False)
+    # device.write("C1:INVT OFF")
+
+
+
+    import pandas as pd
+    import numpy as np
+    time.sleep(13)
+    fname = './log.csv'
+
+    f, axarr = plt.subplots(2, figsize=(8, 5))
+    df = pd.read_csv(fname, skiprows=1, header=None)
+    y=df[0].as_matrix()
+    # y=y/1e5*1e6
+    x=df[1].as_matrix()
+    lth = len(x)
+    t = np.arange(lth)#/srate
+    axarr[0].plot(t, x)
+    axarr[1].plot(t, y)
+    plt.show()
+
+    # plt.figure(figsize=(10,5))
 
     # visa.visa_main()
     # create_wave_file()

@@ -1,4 +1,5 @@
 import nidaqmx
+from nidaqmx import stream_writers, stream_readers
 import matplotlib
 matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
@@ -7,8 +8,9 @@ import time
 import logging
 from utils import plott
 from tqdm import tqdm
-from scipy import signal
 import pandas as pd
+from threading import Thread
+from scipy import signal
 
 ttables = {}
 ttables['xor'] = [[-1, -1, 0], [-1, 1, 1], [1, -1, 1], [1, 1, 0]]
@@ -29,46 +31,74 @@ def perturb_X(X,boost=3,var=1):
 def simple_experiment():
     with nidaqmx.Task() as taskin, nidaqmx.Task() as taskout1, nidaqmx.Task() as taskout2:
         taskout1.ao_channels.add_ao_voltage_chan("AO/ao0")
-        taskout2.ao_channels.add_ao_voltage_chan("AO/ao1")
+        taskout1.ao_channels.add_ao_voltage_chan("AO/ao1")
         taskin.ai_channels.add_ai_voltage_chan("AI/ai0",terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
         taskin.ai_channels.add_ai_voltage_chan("AI/ai1",terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
-        taskin.ai_channels.add_ai_voltage_chan("AI/ai3", terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
-        # taskin.timing.cfg_samp_clk_timing(1000,sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
-        t=np.linspace(0,1,100)
-        sawtooth = 1 + signal.sawtooth(2 * np.pi * 5 * t, width=0.5)
-        sawtooth = 3 * np.hstack((sawtooth, -1 * sawtooth))
-        signal1=5*np.sin(2*np.pi*10*t)
-        signal2 = 1.3*np.sin(2 * np.pi * 3 * t)
+        taskin.ai_channels.add_ai_voltage_chan("AI/ai3",terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
+        # taskin.timing.cfg_samp_clk_timing(100,sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
+        taskout1.timing.cfg_samp_clk_timing(1000,samps_per_chan=4000)
+        taskin.timing.cfg_samp_clk_timing(1000,samps_per_chan=4000)
+        # taskout1.timing.cfg_samp_clk_timing(20000,sample_mode=nidaqmx.constants.AcquisitionType.FINITE,samps_per_chan=1000)
+        # taskout2.timing.cfg_samp_clk_timing(1000)
+
+        t=np.linspace(0,1,4000)
+        # sawtooth = 1 + signal.sawtooth(2 * np.pi * 5 * t, width=0.5)
+        # sawtooth = 3 * np.hstack((sawtooth, -1 * sawtooth))
+        signal1=signal.square(2*np.pi*10*t,0.1)
+        # signal1 = 4*np.sin(2*np.pi*10*t)
+        signal2 = 4*np.sin(2*np.pi*10*t+2*np.pi/2)
+
+        stream_O = stream_writers.AnalogMultiChannelWriter(taskout1.out_stream, auto_start=False)
+        stream_I = stream_readers.AnalogMultiChannelReader(taskin.in_stream)
+        # stream_writers.AnalogMultiChannelWriter
+
+        # Thread(target=test_Reader.read_many_sample, args=[result,nidaqmx.constants.READ_ALL_AVAILABLE,10]).start()
+        # Thread(target=test_Writer.write_many_sample, args=[np.array([signal1,signal2])]).start()
+        stream_O.write_many_sample(np.array([signal1,signal2]))
+
+        taskin.start()
+        taskout1.start()
+
+        result = np.zeros((3, 4000))
+        stream_I.read_many_sample(result)
+        # taskin.wait_until_done()
+        taskout1.wait_until_done()
+        # taskout1.close()
         # signal1=sawtooth
         # signal2=sawtooth
         # signal=0*np.ones(100)
-        taskout1.write(signal1, auto_start=True)
-        result=[]
-        for s1,s2 in tqdm(zip(signal1,signal2)):
-            # time.sleep(0.01)
-            taskout1.write(s1, auto_start=True)
-            # taskout2.write(sawtooth, auto_start=True)
-            result.append(taskin.read(number_of_samples_per_channel=1))
-
-        # result = taskin.read(number_of_samples_per_channel=100)
-        # taskout.write(0, auto_start=True)
-        print(result)
-
-    result=np.array(result)
+        # print(taskout1.write([list(signal1),list(signal2)], auto_start=True))
+        # taskout1.stop()
+        # print(taskout2.write(list(signal2), auto_start=True))
+        # taskout2.stop()
+        # taskout1.stop()
+        # taskout2.write(signal2, auto_start=True)
+        # result=[]
+        # for s1,s2 in tqdm(zip(signal1,signal2)):
+        #     # time.sleep(0.01)
+        #     taskout1.write([s1,s2], auto_start=True)
+        #     # taskout2.write(s2, auto_start=True)
+        #     result.append(taskin.read(number_of_samples_per_channel=1))
+    #
+    #     # result = taskin.read(number_of_samples_per_channel=100)
+    #     # taskout.write(0, auto_start=True)
+    #     print(result)
+    #
+    # result=np.array(result)
     plt.figure()
     plt.subplot(221)
-    plt.plot(result[:,0],label="1")
-    plt.plot(result[:,1],label="2")
-    plt.plot(result[:,2],label="3")
+    plt.plot(result[0],label="aich1")
+    plt.plot(result[1],label="aich2")
+    plt.plot(result[2],label="aich3")
     plt.legend()
     plt.subplot(222)
     plt.plot(signal1,label="signal1")
-    # plt.plot(signal2, label="signal2")
+    plt.plot(signal2,label="signal2")
     plt.legend()
     plt.subplot(212)
-    plt.plot(signal1, result[:,0], label="hist1")
-    plt.plot(signal1, result[:,1], label="hist2")
-    plt.plot(signal1, result[:,2], label="hist2")
+    plt.plot(signal1, result[0], label="hist1")
+    plt.plot(signal2, result[1], label="hist2")
+    plt.plot(signal1, result[2], label="hist2")
     plt.axhline(0, linewidth=.3, color='k')
     plt.axvline(0, linewidth=.3, color='k')
     plt.legend()
@@ -154,4 +184,4 @@ def main2():
     simple_experiment()
 
 if __name__ == "__main__":
-    main()
+    main2()
