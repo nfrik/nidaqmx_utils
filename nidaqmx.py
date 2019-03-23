@@ -28,41 +28,124 @@ def perturb_X(X,boost=3,var=1):
 #     result = np.array(list(map(lambda t: boost*t + (np.random.rand() - 0.5) * var, X)))
     return Y
 
+def get_pulse_train(amp,samps,npulse,wpulse):
+
+    t = np.linspace(0, 1, samps)
+    signals = amp*signal.square(2 * np.pi * npulse * t, wpulse)
+    return signals
+
+def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=0.5):
+    binsteps,inchans=bindata.shape
+
+    freq = round(samps_pulse/pulse_dur)
+    samps = binsteps * samps_pulse
+    total_time = int(np.ceil(1/freq * samps))
+    print("Frequency: {}, Samples: {}, Time required: {}".format(freq,samps,total_time))
+
+    x_p = np.linspace(0,1,samps_pulse)
+    y_p = (signal.square(2*np.pi*x_p+2*np.pi/2,duty)+1)/2
+
+    #construct list of peak rising indxs
+    peak_rise_idx=list(y_p).index(1)
+    peak_start_idx_lst=np.arange(peak_rise_idx,samps,samps_pulse)
+
+
+    sig=np.zeros((inchans, samps))
+
+    for bincol, chan in zip(bindata.T,range(inchans)):
+        pulses=[]
+        for binval in bincol:
+            pulses=np.append(pulses,binval*y_p)
+        sig[chan]=pulses
+
+    with nidaqmx.Task() as taskin, nidaqmx.Task() as taskout:
+        for inchan in range(inchans):
+            taskout.ao_channels.add_ao_voltage_chan("AO/ao{}".format(inchan))
+        for outchan in range(outchans):
+            taskin.ai_channels.add_ai_voltage_chan("AI/ai{}".format(outchan),terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
+
+        taskout.timing.cfg_samp_clk_timing(freq, samps_per_chan=samps)
+        taskin.timing.cfg_samp_clk_timing(freq, samps_per_chan=samps, source='ao/SampleClock')
+
+        stream_O = stream_writers.AnalogMultiChannelWriter(taskout.out_stream, auto_start=False)
+        stream_I = stream_readers.AnalogMultiChannelReader(taskin.in_stream)
+
+        #Upload signal to hardware buffer
+        stream_O.write_many_sample(sig)
+
+        taskin.start()
+        taskout.start()
+
+        result = np.zeros((outchans, samps))
+        stream_I.read_many_sample(result,timeout=total_time*1.2)
+        # taskin.wait_until_done()
+        taskout.wait_until_done()
+
+        plt.figure()
+        plt.subplot(211)
+        t=np.arange(samps)/freq
+        for r, chan in zip(result,range(outchans)):
+            plt.plot(t,r, label="out sig {}".format(chan))
+
+        for idx in peak_start_idx_lst:
+            plt.plot(t[idx],0,'o',color='r')
+
+        plt.legend()
+        plt.subplot(212)
+        for s,chan in zip(sig,range(inchans)):
+            plt.plot(t,s, label="inp sig {}".format(chan))
+
+        plt.legend()
+        plt.show()
+
+        return  {"peak_idx":peak_start_idx_lst,"result":result}
+        #construct trains of pulses for each sample
+        # for rw in bindata:
+
+
 def simple_experiment():
-    with nidaqmx.Task() as taskin, nidaqmx.Task() as taskout1, nidaqmx.Task() as taskout2:
-        taskout1.ao_channels.add_ao_voltage_chan("AO/ao0")
-        taskout1.ao_channels.add_ao_voltage_chan("AO/ao1")
+    with nidaqmx.Task() as taskin, nidaqmx.Task() as taskout:
+        taskout.ao_channels.add_ao_voltage_chan("AO/ao0")
+        taskout.ao_channels.add_ao_voltage_chan("AO/ao1")
+        taskout.ao_channels.add_ao_voltage_chan("AO/ao2")
         taskin.ai_channels.add_ai_voltage_chan("AI/ai0",terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
         taskin.ai_channels.add_ai_voltage_chan("AI/ai1",terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
-        taskin.ai_channels.add_ai_voltage_chan("AI/ai3",terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
+        taskin.ai_channels.add_ai_voltage_chan("AI/ai2",terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
         # taskin.timing.cfg_samp_clk_timing(100,sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
-        taskout1.timing.cfg_samp_clk_timing(1000,samps_per_chan=4000)
-        taskin.timing.cfg_samp_clk_timing(1000,samps_per_chan=4000)
+        samps=10000
+        freq=10000
+        taskout.timing.cfg_samp_clk_timing(freq,samps_per_chan=samps)
+        taskin.timing.cfg_samp_clk_timing(freq,samps_per_chan=samps,source='ao/SampleClock')
+        # taskin.timing.ref_clk_src
+        taskin.triggers.arm_start_trigger
         # taskout1.timing.cfg_samp_clk_timing(20000,sample_mode=nidaqmx.constants.AcquisitionType.FINITE,samps_per_chan=1000)
         # taskout2.timing.cfg_samp_clk_timing(1000)
 
-        t=np.linspace(0,1,4000)
+        t=np.linspace(0,1,samps)
         # sawtooth = 1 + signal.sawtooth(2 * np.pi * 5 * t, width=0.5)
         # sawtooth = 3 * np.hstack((sawtooth, -1 * sawtooth))
-        signal1=signal.square(2*np.pi*10*t,0.1)
+        signal1=1+signal.square(2*np.pi*1*t+2*np.pi/2,0.005)
+        signal1+=2+2*signal.square(2*np.pi*1*t+2*np.pi/2+10*0.005,0.005)
+        signal1=signal.square(2 * np.pi * 150 * t, 0.01)
         # signal1 = 4*np.sin(2*np.pi*10*t)
-        signal2 = 4*np.sin(2*np.pi*10*t+2*np.pi/2)
+        signal2 = 4*np.sin(2*np.pi*100*t+2*np.pi/2)
+        signal3 = 4 * np.sin(2 * np.pi * 100 * t)
 
-        stream_O = stream_writers.AnalogMultiChannelWriter(taskout1.out_stream, auto_start=False)
+        stream_O = stream_writers.AnalogMultiChannelWriter(taskout.out_stream, auto_start=False)
         stream_I = stream_readers.AnalogMultiChannelReader(taskin.in_stream)
         # stream_writers.AnalogMultiChannelWriter
 
         # Thread(target=test_Reader.read_many_sample, args=[result,nidaqmx.constants.READ_ALL_AVAILABLE,10]).start()
         # Thread(target=test_Writer.write_many_sample, args=[np.array([signal1,signal2])]).start()
-        stream_O.write_many_sample(np.array([signal1,signal2]))
+        stream_O.write_many_sample(np.array([signal1,signal2,signal3]))
 
         taskin.start()
-        taskout1.start()
+        taskout.start()
 
-        result = np.zeros((3, 4000))
+        result = np.zeros((3, samps))
         stream_I.read_many_sample(result)
         # taskin.wait_until_done()
-        taskout1.wait_until_done()
+        taskout.wait_until_done()
         # taskout1.close()
         # signal1=sawtooth
         # signal2=sawtooth
@@ -94,6 +177,7 @@ def simple_experiment():
     plt.subplot(222)
     plt.plot(signal1,label="signal1")
     plt.plot(signal2,label="signal2")
+    plt.plot(signal3,label="signal2")
     plt.legend()
     plt.subplot(212)
     plt.plot(signal1, result[0], label="hist1")
@@ -181,7 +265,8 @@ def main():
     print(result)
 
 def main2():
-    simple_experiment()
+    # simple_experiment()
+    multi_measurement(5*(2*np.random.rand(100,3)-1),outchans=3,pulse_dur=.1,samps_pulse=50,duty=0.2)
 
 if __name__ == "__main__":
     main2()
