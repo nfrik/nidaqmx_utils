@@ -11,6 +11,7 @@ from tqdm import tqdm
 import pandas as pd
 from threading import Thread
 from scipy import signal
+from scipy.ndimage.interpolation import shift
 
 ttables = {}
 ttables['xor'] = [[-1, -1, 0], [-1, 1, 1], [1, -1, 1], [1, 1, 0]]
@@ -38,16 +39,22 @@ def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=
     binsteps,inchans=bindata.shape
 
     freq = round(samps_pulse/pulse_dur)
+
     samps = binsteps * samps_pulse
     total_time = int(np.ceil(1/freq * samps))
     print("Frequency: {}, Samples: {}, Time required: {}".format(freq,samps,total_time))
+
+    if freq>25000:
+        raise ValueError('AO frequency exceeded 25kS/s/ch')
 
     x_p = np.linspace(0,1,samps_pulse)
     y_p = (signal.square(2*np.pi*x_p+2*np.pi/2,duty)+1)/2
 
     #construct list of peak rising indxs
     peak_rise_idx=list(y_p).index(1)
-    peak_start_idx_lst=np.arange(peak_rise_idx,samps,samps_pulse)
+    peak_fall_idx = len(y_p)-list(y_p[::-1]).index(1)-1
+    peak_start_idx_lst=np.arange(peak_rise_idx, samps, samps_pulse)
+    peak_end_idx_lst = np.arange(peak_fall_idx, samps, samps_pulse)
 
 
     sig=np.zeros((inchans, samps))
@@ -57,6 +64,9 @@ def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=
         for binval in bincol:
             pulses=np.append(pulses,binval*y_p)
         sig[chan]=pulses
+
+    # Due to 1 step delay in the 1st channel have to apply a hack to shift data by one step
+    sig[0, :] = shift(sig[0, :], -1)
 
     with nidaqmx.Task() as taskin, nidaqmx.Task() as taskout:
         for inchan in range(inchans):
@@ -89,6 +99,9 @@ def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=
 
         for idx in peak_start_idx_lst:
             plt.plot(t[idx],0,'o',color='r')
+
+        for idx in peak_end_idx_lst:
+            plt.plot(t[idx], 0, 'o', color='g')
 
         plt.legend()
         plt.subplot(212)
@@ -266,7 +279,9 @@ def main():
 
 def main2():
     # simple_experiment()
-    multi_measurement(5*(2*np.random.rand(100,3)-1),outchans=3,pulse_dur=.1,samps_pulse=50,duty=0.2)
+    data = 5 * (2 * np.random.rand(100, 16) - 1)
+    data = np.repeat(data,6,axis=0)
+    multi_measurement(data,outchans=16,pulse_dur=.005,samps_pulse=50,duty=.5)
 
 if __name__ == "__main__":
     main2()
