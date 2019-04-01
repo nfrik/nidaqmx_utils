@@ -50,9 +50,14 @@ def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=
     x_p = np.linspace(0,1,samps_pulse)
     y_p = (signal.square(2*np.pi*x_p+2*np.pi/2,duty)+1)/2
 
+
     #construct list of peak rising indxs
     peak_rise_idx=list(y_p).index(1)
     peak_fall_idx = len(y_p)-list(y_p[::-1]).index(1)-1
+
+    y_p = (signal.sawtooth(2 * np.pi * 2 * x_p, 0.5) + 1) / 2
+    y_p = shift(y_p, int(np.floor(samps_pulse / 2)))
+
     peak_start_idx_lst=np.arange(peak_rise_idx, samps, samps_pulse)
     peak_end_idx_lst = np.arange(peak_fall_idx, samps, samps_pulse)
 
@@ -65,7 +70,7 @@ def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=
             pulses=np.append(pulses,binval*y_p)
         sig[chan]=pulses
 
-    # Due to 1 step delay in the 1st channel have to apply a hack to shift data by one step
+    # Due to 1 step delay in the 1st channel we need to apply a hack to shift data by one step
     sig[0, :] = shift(sig[0, :], -1)
 
     with nidaqmx.Task() as taskin, nidaqmx.Task() as taskout:
@@ -95,6 +100,7 @@ def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=
         plt.subplot(211)
         t=np.arange(samps)/freq
         for r, chan in zip(result,range(outchans)):
+            # if chan != 1:
             plt.plot(t,r, label="out sig {}".format(chan))
 
         for idx in peak_start_idx_lst:
@@ -103,12 +109,12 @@ def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=
         for idx in peak_end_idx_lst:
             plt.plot(t[idx], 0, 'o', color='g')
 
-        plt.legend()
+        plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05),fancybox=True, shadow=True, ncol=5)
         plt.subplot(212)
         for s,chan in zip(sig,range(inchans)):
             plt.plot(t,s, label="inp sig {}".format(chan))
 
-        plt.legend()
+        plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05),fancybox=True, shadow=True, ncol=5)
         plt.show()
 
         return  {"peak_idx":peak_start_idx_lst,"result":result}
@@ -279,9 +285,11 @@ def main():
 
 def main2():
     # simple_experiment()
-    data = 5 * (2 * np.random.rand(100, 16) - 1)
+    # data = 5 * (2 * np.random.rand(10, 16) - 1)
+    data=7*np.array([[1,-1,1],[-1,1,-1]])
     data = np.repeat(data,6,axis=0)
-    multi_measurement(data,outchans=16,pulse_dur=.005,samps_pulse=50,duty=.5)
+    # data[:,0]=data[:,0]/3
+    multi_measurement(data,outchans=4,pulse_dur=.3,samps_pulse=50,duty=.5)
 
 if __name__ == "__main__":
     main2()
