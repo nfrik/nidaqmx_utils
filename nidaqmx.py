@@ -6,12 +6,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import time
 import logging
+import json
 from utils import plott
 from tqdm import tqdm
 import pandas as pd
 from threading import Thread
 from scipy import signal
 from scipy.ndimage.interpolation import shift
+from scipy.signal import find_peaks
 
 ttables = {}
 ttables['xor'] = [[-1, -1, 0], [-1, 1, 1], [1, -1, 1], [1, 1, 0]]
@@ -35,7 +37,36 @@ def get_pulse_train(amp,samps,npulse,wpulse):
     signals = amp*signal.square(2 * np.pi * npulse * t, wpulse)
     return signals
 
-def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=0.5):
+
+def filter_sharps(data, peakstarts, peakends):
+    # points = np.array([[a, b] for a, b in zip(peakstarts, peakends)]).ravel()
+    # pointmap = np.ones_like(data)
+    # for point in points:
+    #     pointmap[:,point] = 0
+    #     pointmap[:,point - 1] = 0
+    #     pointmap[:,point + 1] = 0
+
+    # return np.multiply(data, pointmap)
+
+    for p_s in peakstarts:
+        try:
+            data[:,p_s]=data[:,p_s-2]
+            data[:, p_s-1] = data[:, p_s - 2]
+            data[:, p_s+1] = data[:, p_s - 2]
+        except:
+            pass
+
+    for p_s in peakends:
+        try:
+            data[:,p_s] = data[:,p_s+2]
+            data[:, p_s-1] = data[:, p_s + 2]
+            data[:, p_s+1] = data[:, p_s + 2]
+        except:
+            pass
+
+    return data
+
+def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=0.5,signal_type='triangle',peak_type='max'):
     binsteps,inchans=bindata.shape
 
     freq = round(samps_pulse/pulse_dur)
@@ -47,16 +78,18 @@ def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=
     if freq>25000:
         raise ValueError('AO frequency exceeded 25kS/s/ch')
 
-    x_p = np.linspace(0,1,samps_pulse)
-    y_p = (signal.square(2*np.pi*x_p+2*np.pi/2,duty)+1)/2
+    x_p = np.linspace(0, 1, samps_pulse)
 
+    if 'square' in signal_type:
+        y_p = (signal.square(2*np.pi*x_p+2*np.pi/2,duty)+1)/2
 
-    #construct list of peak rising indxs
-    peak_rise_idx=list(y_p).index(1)
-    peak_fall_idx = len(y_p)-list(y_p[::-1]).index(1)-1
+    elif 'triangle' in signal_type:
+        y_p = (signal.sawtooth(2 * np.pi * 2 * x_p, 0.5) + 1) / 2
+        y_p = shift(y_p, int(np.floor(samps_pulse / 2)))
 
-    y_p = (signal.sawtooth(2 * np.pi * 2 * x_p, 0.5) + 1) / 2
-    y_p = shift(y_p, int(np.floor(samps_pulse / 2)))
+    # construct list of peak rising indxs
+    peak_rise_idx = list(y_p).index(1)
+    peak_fall_idx = len(y_p) - list(y_p[::-1]).index(1) - 1
 
     peak_start_idx_lst=np.arange(peak_rise_idx, samps, samps_pulse)
     peak_end_idx_lst = np.arange(peak_fall_idx, samps, samps_pulse)
@@ -96,31 +129,123 @@ def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=
         # taskin.wait_until_done()
         taskout.wait_until_done()
 
-        plt.figure()
-        plt.subplot(211)
+
         t=np.arange(samps)/freq
-        for r, chan in zip(result,range(outchans)):
-            # if chan != 1:
-            plt.plot(t,r, label="out sig {}".format(chan))
 
-        for idx in peak_start_idx_lst:
-            plt.plot(t[idx],0,'o',color='r')
+        print("Looking for peaks")
 
-        for idx in peak_end_idx_lst:
-            plt.plot(t[idx], 0, 'o', color='g')
+        if 'max' in peak_type:
+            real_peaks = []
+            for res in result:
+                rp_chan = []
+                for s_p, e_p in zip(peak_start_idx_lst, peak_end_idx_lst):
+                    #         peaks,_ = find_peaks(np.abs(sig[s_p:e_p]))
+                    peaks = np.argmax(np.abs(res[s_p:e_p]))
+                    #         peaks += s_p
+                    #         if len(peaks)>0:
+                    rp_chan.append((peaks + s_p))
+                real_peaks.append(rp_chan)
 
-        plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05),fancybox=True, shadow=True, ncol=5)
-        plt.subplot(212)
-        for s,chan in zip(sig,range(inchans)):
-            plt.plot(t,s, label="inp sig {}".format(chan))
+        elif 'last' in peak_type:
+            real_peaks = []
+            for res in result:
+                rp_chan = []
+                for s_p, e_p in zip(peak_start_idx_lst, peak_end_idx_lst):
+                    #         peaks,_ = find_peaks(np.abs(sig[s_p:e_p]))
+                    # peaks = np.argmax(np.abs(res[s_p:e_p]))
+                    #         peaks += s_p
+                    #         if len(peaks)>0:
+                    rp_chan.append(e_p-2)
+                real_peaks.append(rp_chan)
+        # real_peaks
 
-        plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05),fancybox=True, shadow=True, ncol=5)
-        plt.show()
+        # a = plt.figure()
+        # plt.subplot(211)
+        #
+        # for r, chan in zip(result,range(outchans)):
+        #     # if chan != 1:
+        #     plt.plot(t,r, label="out sig {}".format(chan))
+        #     plt.plot(t[real_peaks[chan]],r[real_peaks[chan]], 'x',label="out sig {}".format(chan))
+        #
+        # # for idx in peak_start_idx_lst:
+        # #     plt.plot(t[idx],0,'o',color='r')
+        # #
+        # # for idx in peak_end_idx_lst:
+        # #     plt.plot(t[idx], 0, 'o', color='g')
+        #
+        # plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05),fancybox=True, shadow=True, ncol=5)
+        #
+        #
+        # plt.subplot(212)
+        # for s,chan in zip(sig,range(inchans)):
+        #     plt.plot(t,s, label="inp sig {}".format(chan))
+        #
+        # plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05),fancybox=True, shadow=True, ncol=5)
+        # # plt.show()
+        # a.show()
+        #
+        #
+        # f=plt.figure()
+        #
+        # plt.subplots_adjust(hspace=0.001)
+        #
+        # tf = str(result.shape[0])
+        #
+        # for s, i in zip(result, range(result.shape[0])):
+        #     ax1 = plt.subplot(int(tf + '1' + str(i + 1)))
+        #     ax1.plot(t,result[i])
+        #     plt.plot(t[real_peaks[i]], result[i][real_peaks[i]], 'x')
+        #     plt.yticks(np.arange(1.2 * np.min(result[i]), 1.2 * np.max(result[i]), 3))
+        #
+        # plt.show()
+        # # f.show()
 
-        return  {"peak_idx":peak_start_idx_lst,"result":result}
+        result = filter_sharps(result,peak_start_idx_lst,peak_end_idx_lst)
+
+        return  {"peak_start_idx":peak_start_idx_lst.tolist(),"peak_end_idx":peak_end_idx_lst.tolist(),"peaks":np.array(real_peaks).tolist(),"result":result.tolist(),"signal":sig.tolist(),"time":t.tolist()}
         #construct trains of pulses for each sample
-        # for rw in bindata:
 
+
+def plot_result(results,replicate):
+    peak_start_idx_lst = results["peak_start_idx"]
+    peak_end_idx_lst = results["peak_end_idx"]
+    peaks = np.array(results["peaks"])
+    peaks = peaks[:,replicate-1::replicate]
+    data = np.array(results["result"])
+    sig = np.array(results["signal"])
+    t = np.array(results['time'])
+
+    a = plt.figure()
+    plt.subplot(211)
+
+    for r, chan in zip(data, range(len(data))):
+        # if chan != 1:
+        plt.plot(t, r, label="out sig {}".format(chan))
+        plt.plot(t[peaks[chan]],r[peaks[chan]], 'x', label="out sig {}".format(chan))
+
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=5)
+
+    plt.subplot(212)
+    for s, chan in zip(sig, range(len(data))):
+        plt.plot(t, s, label="inp sig {}".format(chan))
+
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=5)
+    # plt.show()
+    a.show()
+
+    f = plt.figure()
+
+    plt.subplots_adjust(hspace=0.001)
+
+    tf = str(len(data))
+
+    for s, i in zip(data, range(len(data))):
+        ax1 = plt.subplot(int(tf + '1' + str(i + 1)))
+        ax1.plot(t, data[i])
+        plt.plot(t[peaks[i]], data[i][peaks[i]], 'x')
+        plt.yticks(np.arange(1.2 * np.min(data[i]), 1.2 * np.max(data[i]), 3))
+
+    plt.show()
 
 def simple_experiment():
     with nidaqmx.Task() as taskin, nidaqmx.Task() as taskout:
@@ -286,10 +411,48 @@ def main():
 def main2():
     # simple_experiment()
     # data = 5 * (2 * np.random.rand(10, 16) - 1)
-    data=7*np.array([[1,-1,1],[-1,1,-1]])
-    data = np.repeat(data,6,axis=0)
-    # data[:,0]=data[:,0]/3
-    multi_measurement(data,outchans=4,pulse_dur=.3,samps_pulse=50,duty=.5)
+    # data=10*np.array([[1,0,0],
+    #                   [-1,0,0],
+    #                   [1,0,0],
+    #                   [0,1,0],
+    #                   [0,-1,0],
+    #                   [0, 1, 0]])
+    # data = np.repeat(data,[2,10,2,10],axis=0)
+
+    # data = 10 * np.array([[-1, 0],#R
+    #                       [1,0],#W
+    #                       [-1, 0],#R
+    #                       [0, -1],#R
+    #                       [0,1],#W
+    #                       [0, -1]])#R
+
+
+    replicate=1
+    data = 6 * np.array([[1., -1,.0],  # R
+                          [-1., 1,1],  # W
+                          [1., -1,.0],
+                          [-1., 0,.0],
+                          [0, 1.,1],  # R
+                          [0, -1.,.0],  # W
+                          [0, 1.,.5],
+                          [0, -1.,.0]
+                          ])  # R
+
+
+    # data = np.repeat(data, replicate, axis=0)
+
+    data = np.tile(data,(5,1))
+
+    out = multi_measurement(data,outchans=3,pulse_dur=.005,samps_pulse=50,duty=.5,signal_type='square',peak_type='last')
+
+    peaks = out['peaks']
+
+    plot_result(out,replicate)
+
+    with open('data.json', 'w') as f:
+        print("writing file")
+        json.dump(out, f)
+
 
 if __name__ == "__main__":
     main2()
