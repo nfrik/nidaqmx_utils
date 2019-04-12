@@ -14,6 +14,22 @@ from sklearn.svm import SVC
 from sklearn.preprocessing import scale, normalize, minmax_scale, StandardScaler
 import datetime
 
+
+def calculate_logreg_score(inmat):
+    std_scaler = StandardScaler()
+    std_scaler.fit(inmat)
+    inmat = std_scaler.transform(inmat)
+
+    X = np.array(inmat)[:, :-1]
+    y = np.array(inmat)[:, -1]
+
+    logreg = linear_model.LogisticRegression(C=300.5, verbose=True, tol=1e-8, fit_intercept=True)
+    logreg.fit(X, y)
+
+    var = logreg.score(X, y)
+
+    return var
+
 def plot3d(inmat,inputcirc=None,title=""):
 
     fig = plt.figure()

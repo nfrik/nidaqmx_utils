@@ -66,6 +66,19 @@ def filter_sharps(data, peakstarts, peakends):
 
     return data
 
+def remove_baseline(data,peakstarts,peakends):
+
+    pre_trend = data[:,peakstarts - 2]
+    pos_trend = data[:,peakends - 2]
+
+    trend = np.hstack((pre_trend,pos_trend))
+
+    trend = np.mean(trend,axis=1)
+
+    data = np.subtract(data, trend.reshape((-1, 1)))
+
+    return data
+
 def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=0.5,signal_type='triangle',peak_type='max'):
     binsteps,inchans=bindata.shape
 
@@ -80,16 +93,17 @@ def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=
 
     x_p = np.linspace(0, 1, samps_pulse)
 
-    if 'square' in signal_type:
-        y_p = (signal.square(2*np.pi*x_p+2*np.pi/2,duty)+1)/2
+    # if 'square' in signal_type:
+    y_p = (signal.square(2*np.pi*x_p+2*np.pi/2,duty)+1)/2
 
-    elif 'triangle' in signal_type:
+    peak_rise_idx = list(y_p).index(1)
+    peak_fall_idx = len(y_p) - list(y_p[::-1]).index(1) - 1
+
+    if 'triang' in signal_type:
         y_p = (signal.sawtooth(2 * np.pi * 2 * x_p, 0.5) + 1) / 2
         y_p = shift(y_p, int(np.floor(samps_pulse / 2)))
 
     # construct list of peak rising indxs
-    peak_rise_idx = list(y_p).index(1)
-    peak_fall_idx = len(y_p) - list(y_p[::-1]).index(1) - 1
 
     peak_start_idx_lst=np.arange(peak_rise_idx, samps, samps_pulse)
     peak_end_idx_lst = np.arange(peak_fall_idx, samps, samps_pulse)
@@ -133,6 +147,10 @@ def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=
         t=np.arange(samps)/freq
 
         print("Looking for peaks")
+
+        result = filter_sharps(result, peak_start_idx_lst, peak_end_idx_lst)
+
+        result = remove_baseline(result,peak_start_idx_lst, peak_end_idx_lst)
 
         if 'max' in peak_type:
             real_peaks = []
@@ -199,8 +217,6 @@ def multi_measurement(bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=
         #
         # plt.show()
         # # f.show()
-
-        result = filter_sharps(result,peak_start_idx_lst,peak_end_idx_lst)
 
         return  {"peak_start_idx":peak_start_idx_lst.tolist(),"peak_end_idx":peak_end_idx_lst.tolist(),"peaks":np.array(real_peaks).tolist(),"result":result.tolist(),"signal":sig.tolist(),"time":t.tolist()}
         #construct trains of pulses for each sample
@@ -428,7 +444,7 @@ def main2():
 
 
     replicate=1
-    data = 6 * np.array([[1., -1,.0],  # R
+    data = 1 * np.array([[1., -1,.0],  # R
                           [-1., 1,1],  # W
                           [1., -1,.0],
                           [-1., 0,.0],
@@ -441,11 +457,26 @@ def main2():
 
     # data = np.repeat(data, replicate, axis=0)
 
-    data = np.tile(data,(5,1))
+    data = np.tile(data,(3,1))
 
-    out = multi_measurement(data,outchans=3,pulse_dur=.005,samps_pulse=50,duty=.5,signal_type='square',peak_type='last')
+    data = np.array(ttables['xor'] * 4)
+    X = data[:, :-1]
+    y = data[:, -1]
 
-    peaks = out['peaks']
+    data = perturb_X(X, boost=5.0, var=0.00)
+
+    # data = np.hstack((data,np.array([-0*np.ones_like(data[:,0])]).T))
+
+    out = multi_measurement(data,outchans=3,pulse_dur=.2,samps_pulse=100,duty=.5,signal_type='triangle',peak_type='max')
+
+    yp = np.array(out['result'])[:, np.array(out['peaks'])[0, :]]
+
+    result = np.hstack((yp.T, np.array([y]).T))
+
+    print("Got score",plott.calculate_logreg_score(result))
+
+    plott.plot3d(result)
+    # plott.pca_plotter(result)
 
     plot_result(out,replicate)
 
