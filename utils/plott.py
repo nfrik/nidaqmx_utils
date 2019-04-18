@@ -13,22 +13,40 @@ from sklearn.decomposition import PCA
 from sklearn.svm import SVC
 from sklearn.preprocessing import scale, normalize, minmax_scale, StandardScaler
 import datetime
-
+import seaborn as sns
+sns.set(style="white")
 
 def calculate_logreg_score(inmat):
     std_scaler = StandardScaler()
-    std_scaler.fit(inmat)
-    inmat = std_scaler.transform(inmat)
+    # std_scaler.fit(inmat)
+    # inmat = std_scaler.transform(inmat)
 
     X = np.array(inmat)[:, :-1]
+    std_scaler.fit(X)
+    X = std_scaler.transform(X)
+
     y = np.array(inmat)[:, -1]
 
-    logreg = linear_model.LogisticRegression(C=300.5, verbose=True, tol=1e-8, fit_intercept=True)
+    logreg = linear_model.LogisticRegression(verbose=False, tol=1e-8, fit_intercept=True)
     logreg.fit(X, y)
 
     var = logreg.score(X, y)
 
     return var
+
+
+def draw_linear_decision_bound(ax, X, y):
+    clf = linear_model.LogisticRegression(fit_intercept=True).fit(X, y)
+    xx, yy = np.mgrid[np.min(X[:, 0]):np.max(X[:, 0]):.01, np.min(X[:, 1]):np.max(X[:, 1]):.01]
+    grid = np.c_[xx.ravel(), yy.ravel()]
+    probs = clf.predict_proba(grid)[:, 1].reshape(xx.shape)
+    ax.contour(xx, yy, probs, levels=[.5], cmap="Greys", vmin=0, vmax=.6)
+
+    # ax.scatter(X[:, 0], X[:, 1], c=y[:], s=50,
+    #            cmap="RdBu", vmin=-.2, vmax=1.2,
+    #            edgecolor="white", linewidth=1)
+    ax.scatter(X[:, 0], X[:, 1], cmap="RdBu_r", vmin=-1.5, vmax=1.5, s=100, c=y[:], linewidth=1,
+               edgecolor='white')
 
 def plot3d(inmat,inputcirc=None,title=""):
 
@@ -89,8 +107,9 @@ def plot3d(inmat,inputcirc=None,title=""):
     plt.show()
     return ax
 
-def pca_plotter(input,savepath=""):
+def pca_plotter(input,title='',savepath=""):
     fig = plt.figure()
+    fig.suptitle(title)
 
     std_scaler = StandardScaler()
     std_scaler.fit(input)
@@ -125,14 +144,20 @@ def pca_plotter(input,savepath=""):
         axs.append(fig.add_subplot(pn,pn,feat+1))
 
     colors = ['red', 'blue']
-    for color, i in zip(colors, [min(y), max(y)]):
-        for ax, comb in zip(axs, combs):
-            ax.scatter(X_r[y == i, comb[0]], X_r[y == i, comb[1]], color=color)
+
+    for ax, comb in zip(axs, combs):
+        # for color, i in zip(colors, [min(y), max(y)]):
+            # ax.scatter(X_r[y == i, comb[0]], X_r[y == i, comb[1]], color=color)
+        # ax.scatter(X_r[:, comb[0]], X_r[:, comb[1]],cmap="RdBu_r",vmin=-1.5,vmax=1.5, s=100, c=y[:], linewidth=1,edgecolor='white')
+        draw_linear_decision_bound(ax,X_r[:,[comb[0],comb[1]]],y)
 
     if savepath!="":
         plt.savefig(savepath)
     else:
         plt.show()
+
+
+
 
 def plot_json_graph(dictdata,imagepath=""):
 

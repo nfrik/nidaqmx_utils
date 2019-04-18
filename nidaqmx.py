@@ -14,6 +14,8 @@ from threading import Thread
 from scipy import signal
 from scipy.ndimage.interpolation import shift
 from scipy.signal import find_peaks
+from datetime import datetime
+from hyperopt import hp, tpe, fmin
 
 ttables = {}
 ttables['xor'] = [[-1, -1, 0], [-1, 1, 1], [1, -1, 1], [1, 1, 0]]
@@ -30,6 +32,24 @@ def perturb_X(X,boost=3,var=1):
         Y[idx]+=(np.random.rand() - 0.5) * var
 #     result = np.array(list(map(lambda t: boost*t + (np.random.rand() - 0.5) * var, X)))
     return Y
+
+def bool_tt(ary=3,op='^'):
+    assert ary>1
+    exprs=[]
+    results=[]
+    for i in range(2**ary):
+        expr=bin(i)[2:].zfill(ary)
+        res=eval(op.join(list(expr)))
+        expr=[-1 if c=='0' else 1 for c in list(expr)]
+        expr.append(res)
+        exprs.append(list(expr))
+    return exprs
+
+def get_tt(op='^',nary=3,periods=6,boost=1,var=0.0):
+    data=np.array(bool_tt(ary=nary,op=op)*periods)
+    # X = data[:,:-1]
+    # y = data[:,-1]
+    return data
 
 def get_pulse_train(amp,samps,npulse,wpulse):
 
@@ -459,15 +479,24 @@ def main2():
 
     data = np.tile(data,(3,1))
 
-    data = np.array(ttables['xor'] * 4)
+    # data = np.array(ttables['xor'] * 4)
+    data = get_tt(nary=2, periods=10, op='^')
+
+    np.random.shuffle(data)
+
     X = data[:, :-1]
     y = data[:, -1]
 
-    data = perturb_X(X, boost=5.0, var=0.00)
+    data = perturb_X(X, boost=8.0, var=0.00)
 
-    # data = np.hstack((data,np.array([-0*np.ones_like(data[:,0])]).T))
 
-    out = multi_measurement(data,outchans=3,pulse_dur=.2,samps_pulse=100,duty=.5,signal_type='triangle',peak_type='max')
+    # data = np.hstack((data, np.array([-1.46 * np.ones_like(data[:, 0])]).T))
+    #
+    # data = np.hstack((data,np.array([-0.848*np.ones_like(data[:,0])]).T))
+    #
+    # data = np.hstack((data, np.array([-7.65 * np.ones_like(data[:, 0])]).T))
+
+    out = multi_measurement(data,outchans=4,pulse_dur=.1,samps_pulse=100,duty=.5,signal_type='square',peak_type='last')
 
     yp = np.array(out['result'])[:, np.array(out['peaks'])[0, :]]
 
@@ -475,8 +504,8 @@ def main2():
 
     print("Got score",plott.calculate_logreg_score(result))
 
-    plott.plot3d(result)
-    # plott.pca_plotter(result)
+    # plott.plot3d(result)
+    plott.pca_plotter(result)
 
     plot_result(out,replicate)
 
@@ -485,5 +514,66 @@ def main2():
         json.dump(out, f)
 
 
+def opt_func(args):
+
+    # c1 = args
+
+    control = args['control']
+
+    mul = args['params']['multiplier']
+
+
+    # data = np.array(ttables['xor3'] * 4)
+    data = get_tt(nary=3, periods=2, op='^')
+
+    X = data[:, :-1]
+    y = data[:, -1]
+
+    data = perturb_X(X, boost=mul, var=0.0)
+
+    for c in control:
+        data = np.hstack((data, np.array([c * np.ones_like(data[:, 0])]).T))
+
+    out = multi_measurement(data, outchans=3, pulse_dur=.1, samps_pulse=100, duty=.5, signal_type='triang',
+                            peak_type='max')
+
+    yp = np.array(out['result'])[:, np.array(out['peaks'])[0, :]]
+
+    result = np.hstack((yp.T, np.array([y]).T))
+
+    score = plott.calculate_logreg_score(result)
+
+    if args['plot']:
+        plott.pca_plotter(result,title="Score {}".format(score),savepath='./output/{}.png'.format(datetime.now().strftime("%Y%m%d-%H%M%S-%f")))
+
+    return -score
+
+def dummy_f(args):
+    print(args)
+    return 0
+
+def main_opt():
+    space = {'control':[hp.uniform('c1',-8,8),hp.uniform('c2',-8,8),hp.uniform('c3',-8,8)],
+             'params':{
+                 'multiplier':hp.choice('m',[1.,2.,3.,4.,5.,6.,7.,8.])
+                },
+             'plot':True
+             }
+
+    # best = fmin(opt_func,space,algo=tpe.suggest,max_evals=30,verbose=True)
+    best = fmin(opt_func, space, algo=tpe.suggest, max_evals=2, verbose=True)
+
+    bvals={'control': [best['c1'], best['c2'], best['c3']],
+     'params': {
+         'multiplier': best['m']
+     },
+     'plot': True
+     }
+
+    opt_func(bvals)
+
+    print(best)
+
 if __name__ == "__main__":
-    main2()
+    # main2()
+    main_opt()
