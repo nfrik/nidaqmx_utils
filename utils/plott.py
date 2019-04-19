@@ -27,7 +27,7 @@ def calculate_logreg_score(inmat):
 
     y = np.array(inmat)[:, -1]
 
-    logreg = linear_model.LogisticRegression(verbose=False, tol=1e-8, fit_intercept=True)
+    logreg = linear_model.LogisticRegression(C=1., verbose=False, tol=1e-8, fit_intercept=True)
     logreg.fit(X, y)
 
     var = logreg.score(X, y)
