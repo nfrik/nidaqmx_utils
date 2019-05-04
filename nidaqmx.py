@@ -32,6 +32,7 @@ class Measurement:
         self.current_folder_name=None
         self.file_index=0
         self.peak_find_delta=2
+        self.optim_score=[]
 
     def perturb_X(self,X,boost=3,var=1):
         # Y=X.copy()
@@ -107,8 +108,27 @@ class Measurement:
 
         return data
 
-    def multi_measurement(self,bindata, outchans=2, pulse_dur=0.1, samps_pulse=1000,duty=0.5,signal_type='triangle',peak_type='max'):
-        binsteps,inchans=bindata.shape
+    def channel_collision(self,*lists):
+        keys=[]
+        # for d in dicts:
+        #     keys.append(d.keys())
+        for l in lists:
+            keys.append(set(l))
+
+        unique=set.intersection(*keys)
+
+        if len(list(unique))>0:
+            return True
+        return False
+
+
+    def multi_measurement2(self, indata={}, contdata={}, outchans=[], pulse_dur=0.1, samps_pulse=1000, duty=0.5, signal_type='triangle', peak_type='max'):
+        # binsteps,inchans=indata.shape
+        inchans = len(indata.keys())
+        binsteps = len(indata.items()[0])
+
+        if self.channel_collision(indata,contdata):
+            raise ValueError('Input and control channels should not intersect')
 
         freq = round(samps_pulse/pulse_dur)
 
@@ -137,22 +157,41 @@ class Measurement:
         peak_end_idx_lst = np.arange(peak_fall_idx, samps, samps_pulse)
 
 
-        sig=np.zeros((inchans, samps))
+        #prepare input data
+        insig=np.zeros((inchans, samps))
 
-        for bincol, chan in zip(bindata.T,range(inchans)):
+        for bincol, chan in zip(indata[sorted(indata.keys())], range(inchans)):
             pulses=[]
             for binval in bincol:
                 pulses=np.append(pulses,binval*y_p)
-            sig[chan]=pulses
+            insig[chan]=pulses
 
         # Due to 1 step delay in the 1st channel we need to apply a hack to shift data by one step
-        sig[0, :] = shift(sig[0, :], -1)
+        insig[0, :] = shift(insig[0, :], -1)
+
+        # prepare input data
+        insig = np.zeros((inchans, samps))
+
+        for bincol, chan in zip(indata[sorted(indata.keys())], range(inchans)):
+            pulses = []
+            for binval in bincol:
+                pulses = np.append(pulses, binval * y_p)
+            insig[chan] = pulses
+
+        # Due to 1 step delay in the 1st channel we need to apply a hack to shift data by one step
+        insig[0, :] = shift(insig[0, :], -1)
 
         with nidaqmx.Task() as taskin, nidaqmx.Task() as taskout:
-            for inchan in range(inchans):
+
+            for inchan in indata.keys():
                 taskout.ao_channels.add_ao_voltage_chan("AO/ao{}".format(inchan))
-            for outchan in range(outchans):
-                taskin.ai_channels.add_ai_voltage_chan("AI/ai{}".format(outchan),terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
+
+            for contchan in contdata.keys():
+                    taskout.ao_channels.add_ao_voltage_chan("AO/ao{}".format(contchan))
+
+            for outchan in outchans:
+                taskin.ai_channels.add_ai_voltage_chan("AI/ai{}".format(outchan),
+                                                           terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
 
             taskout.timing.cfg_samp_clk_timing(freq, samps_per_chan=samps)
             taskin.timing.cfg_samp_clk_timing(freq, samps_per_chan=samps, source='ao/SampleClock')
@@ -161,7 +200,7 @@ class Measurement:
             stream_I = stream_readers.AnalogMultiChannelReader(taskin.in_stream)
 
             #Upload signal to hardware buffer
-            stream_O.write_many_sample(sig)
+            stream_O.write_many_sample(insig)
 
             taskin.start()
             taskout.start()
@@ -246,15 +285,180 @@ class Measurement:
             # plt.show()
             # # f.show()
 
+            return  {"peak_start_idx":peak_start_idx_lst.tolist(),"peak_end_idx":peak_end_idx_lst.tolist(),"peaks":np.array(real_peaks).tolist(),"result":result.tolist(),"signal":insig.tolist(),"time":t.tolist()}
+            #construct trains of pulses for each sample
+
+    def multi_measurement(self, bindata, pulse_dur=0.1, samps_pulse=1000,duty=0.5,signal_type='triangle',peak_type='max',inmask=[],contmask=[],outchans=[]):
+        binsteps,inchans = bindata.shape
+
+        if self.channel_collision(inmask,contmask):
+            raise ValueError('Input and control channels must have distinct numbers')
+
+        inmask=inmask+contmask
+
+        freq = round(samps_pulse/pulse_dur)
+
+        samps = binsteps * samps_pulse
+        total_time = int(np.ceil(1/freq * samps))
+        print("Frequency: {}, Samples: {}, Time required: {}".format(freq,samps,total_time))
+
+        if freq>25000:
+            raise ValueError('AO frequency exceeded 25kS/s/ch')
+
+        x_p = np.linspace(0, 1, samps_pulse)
+
+        # if 'square' in signal_type:
+        y_p = (signal.square(2*np.pi*x_p+2*np.pi/2,duty)+1)/2
+
+        peak_rise_idx = list(y_p).index(1)
+        peak_fall_idx = len(y_p) - list(y_p[::-1]).index(1) - 1
+
+        if 'triang' in signal_type:
+            y_p = (signal.sawtooth(2 * np.pi * 2 * x_p, 0.5) + 1) / 2
+            y_p = shift(y_p, int(np.floor(samps_pulse / 2)))
+
+        # construct list of peak rising indxs
+
+        peak_start_idx_lst=np.arange(peak_rise_idx, samps, samps_pulse)
+        peak_end_idx_lst = np.arange(peak_fall_idx, samps, samps_pulse)
+
+
+        sig=np.zeros((inchans, samps))
+
+        for bincol, chan in zip(bindata.T,range(inchans)):
+            pulses=[]
+            for binval in bincol:
+                pulses=np.append(pulses,binval*y_p)
+            sig[chan]=pulses
+
+        # Due to 1 step delay in the 1st channel we need to apply a hack to shift data by one step
+        sig[0, :] = shift(sig[0, :], -1)
+
+        with nidaqmx.Task() as taskin, nidaqmx.Task() as taskout:
+
+            for inchan in inmask:
+                taskout.ao_channels.add_ao_voltage_chan("AO/ao{}".format(inchan))
+
+            for outchan in outchans:
+                taskin.ai_channels.add_ai_voltage_chan("AI/ai{}".format(outchan),terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
+
+            taskout.timing.cfg_samp_clk_timing(freq, samps_per_chan=samps)
+            taskin.timing.cfg_samp_clk_timing(freq, samps_per_chan=samps, source='ao/SampleClock')
+
+            stream_O = stream_writers.AnalogMultiChannelWriter(taskout.out_stream, auto_start=False)
+            stream_I = stream_readers.AnalogMultiChannelReader(taskin.in_stream)
+
+            #Upload signal to hardware buffer
+            stream_O.write_many_sample(sig)
+
+            taskin.start()
+            taskout.start()
+
+            result = np.zeros((len(outchans), samps))
+            stream_I.read_many_sample(result,timeout=total_time*1.2)
+            # taskin.wait_until_done()
+            taskout.wait_until_done()
+
+
+            t=np.arange(samps)/freq
+
+            # print("Looking for peaks")
+
+            result = self.filter_sharps(result, peak_start_idx_lst, peak_end_idx_lst)
+
+            result = self.remove_baseline(result,peak_start_idx_lst, peak_end_idx_lst)
+
+            if 'max' in peak_type:
+                real_peaks = []
+                for res in result:
+                    rp_chan = []
+                    for s_p, e_p in zip(peak_start_idx_lst, peak_end_idx_lst):
+                        #         peaks,_ = find_peaks(np.abs(sig[s_p:e_p]))
+                        peaks = np.argmax(np.abs(res[s_p:e_p]))
+                        #         peaks += s_p
+                        #         if len(peaks)>0:
+                        rp_chan.append((peaks + s_p))
+                    real_peaks.append(rp_chan)
+
+            elif 'last' in peak_type:
+                real_peaks = []
+                for res in result:
+                    rp_chan = []
+                    for s_p, e_p in zip(peak_start_idx_lst, peak_end_idx_lst):
+                        #         peaks,_ = find_peaks(np.abs(sig[s_p:e_p]))
+                        # peaks = np.argmax(np.abs(res[s_p:e_p]))
+                        #         peaks += s_p
+                        #         if len(peaks)>0:
+                        rp_chan.append(e_p-2)
+                    real_peaks.append(rp_chan)
+            # real_peaks
+
             return  {"peak_start_idx":peak_start_idx_lst.tolist(),"peak_end_idx":peak_end_idx_lst.tolist(),"peaks":np.array(real_peaks).tolist(),"result":result.tolist(),"signal":sig.tolist(),"time":t.tolist()}
             #construct trains of pulses for each sample
 
+    def analog_measurement(self, andata, outchans=2, freq=1000):
+        andata = andata.T.copy()
+        inchans,samps = andata.shape
+
+        freq=float(freq)
+        total_time = int(np.ceil(1/freq * samps))
+        print("Frequency: {}, Samples: {}, Time required: {}".format(freq,samps,total_time))
+
+        if freq>25000:
+            raise ValueError('AO frequency exceeded 25kS/s/ch')
+
+        with nidaqmx.Task() as taskin, nidaqmx.Task() as taskout:
+            for inchan in range(inchans):
+                taskout.ao_channels.add_ao_voltage_chan("AO/ao{}".format(inchan))
+            for outchan in range(outchans):
+                taskin.ai_channels.add_ai_voltage_chan("AI/ai{}".format(outchan),terminal_config=nidaqmx.constants.TerminalConfiguration.RSE)
+
+            taskout.timing.cfg_samp_clk_timing(freq, samps_per_chan=samps)
+            taskin.timing.cfg_samp_clk_timing(freq, samps_per_chan=samps, source='ao/SampleClock')
+
+            stream_O = stream_writers.AnalogMultiChannelWriter(taskout.out_stream, auto_start=False)
+            stream_I = stream_readers.AnalogMultiChannelReader(taskin.in_stream)
+
+            #Upload signal to hardware buffer
+            stream_O.write_many_sample(andata)
+
+            taskin.start()
+            taskout.start()
+
+            result = np.zeros((outchans, samps))
+            stream_I.read_many_sample(result,timeout=total_time*1.2)
+            # taskin.wait_until_done()
+            taskout.wait_until_done()
+
+            t=np.arange(samps)/freq
+
+            # print("Looking for peaks")
+
+
+            return  {"result":result.tolist(),"signal":andata.tolist(),"time":t.tolist()}
+            #construct trains of pulses for each sample
+
+    def plot_hysteresis(self,results):
+        data = np.array(results["result"])
+        sig = np.array(results["signal"])
+        t = np.array(results['time'])
+
+        a = plt.figure()
+
+        for r, chan in zip(data, range(len(data))):
+            # if chan != 1:
+            plt.plot(sig[0], r, label="out sig {}".format(chan))
+
+        plt.show()
+
 
     def plot_result(self,results,replicate,savepath=''):
-        peak_start_idx_lst = results["peak_start_idx"]
-        peak_end_idx_lst = results["peak_end_idx"]
-        peaks = np.array(results["peaks"])
-        peaks = peaks[:,replicate-1::replicate]
+
+        try:
+            peaks = np.array(results["peaks"])
+            peaks = peaks[:, replicate - 1::replicate]
+        except:
+            pass
         data = np.array(results["result"])
         sig = np.array(results["signal"])
         t = np.array(results['time'])
@@ -265,12 +469,15 @@ class Measurement:
         for r, chan in zip(data, range(len(data))):
             # if chan != 1:
             plt.plot(t, r, label="out sig {}".format(chan))
-            plt.plot(t[peaks[chan]],r[peaks[chan]], 'x', label="out sig {}".format(chan))
+            try:
+                plt.plot(t[peaks[chan]],r[peaks[chan]], 'x', label="out sig {}".format(chan))
+            except:
+                pass
 
         plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=5)
 
         plt.subplot(212)
-        for s, chan in zip(sig, range(len(data))):
+        for s, chan in zip(sig, range(sig.shape[0])):
             plt.plot(t, s, label="inp sig {}".format(chan))
 
         plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=5)
@@ -290,7 +497,10 @@ class Measurement:
         for s, i in zip(data, range(len(data))):
             ax1 = plt.subplot(int(tf + '1' + str(i + 1)))
             ax1.plot(t, data[i])
-            plt.plot(t[peaks[i]], data[i][peaks[i]], 'x')
+            try:
+                plt.plot(t[peaks[i]], data[i][peaks[i]], 'x')
+            except:
+                pass
             plt.yticks(np.arange(1.2 * np.min(data[i]), 1.2 * np.max(data[i]), 3))
 
         if savepath=="":
@@ -432,7 +642,7 @@ class Measurement:
 
 
         # data = np.array(ttables['xor3'] * 4)
-        data = self.get_tt(nary=2, periods=2, op='^')
+        data = self.get_tt(nary=3, periods=2, op='^')
         replicate = 4
         data = np.repeat(data, replicate, axis=0)
 
@@ -444,9 +654,10 @@ class Measurement:
         for c in control:
             data = np.hstack((data, np.array([c * np.ones_like(data[:, 0])]).T))
 
-        out = self.multi_measurement(data, outchans=3,
+        out = self.multi_measurement(data,
+                                outchans=4,
                                 pulse_dur=.1,
-                                samps_pulse=30,
+                                samps_pulse=50,
                                 duty=.5,
                                 signal_type='square',
                                 peak_type='last')
@@ -465,12 +676,44 @@ class Measurement:
                 if not os.path.exists(self.current_folder_name):
                     os.makedirs(self.current_folder_name)
             plott.pca_plotter(result,title="Score {0:.2f} {1}".format(score,args['control']),savepath=os.path.join(self.current_folder_name,'pca_{}.png').format(self.file_index))
+
+            plott.plot_line(self.optim_score,title='Optimization Score Trend',savepath=os.path.join(self.current_folder_name,'score.png'))
+
+            np.save(os.path.join(self.current_folder_name,'result_{}.npy').format(self.file_index),result)
+
             # './output/20190419_2xor4/pca{}.png'.format(datetime.now().strftime("%Y%m%d-%H%M%S-%f")
             # plott.pca_plotter(result, title="Score {0:.2f} {1}".format(score,args['control']))
-            self.plot_result(results=out, replicate=1, savepath=os.path.join(self.current_folder_name,'wave_{}.png'.format(self.file_index)))
+            self.plot_result(results=out, replicate=replicate, savepath=os.path.join(self.current_folder_name,'wave_{}.png'.format(self.file_index)))
             self.file_index += 1
 
+        self.optim_score.append(score)
         return -score
+
+
+    def mask_data(self,data,mask=[]):
+        #check if dimensions agree
+
+        data_dim=data.shape[1]
+        mask_dim=len(mask)
+        if data_dim != mask_dim:
+            raise ValueError('Mask and data dimensions must agree')
+
+        masked_data={}
+
+        for data_col, maskid in zip(data.T,mask):
+            masked_data[maskid]=data_col
+
+        return masked_data
+
+    def unmask_data(self,masked_data):
+        masked_data.keys()
+        data=[]
+        for key in sorted(masked_data.keys()):
+            data.append(data[key])
+
+        data=np.array(data)
+        return data
+
 
 def dummy_f(args):
     print(args,-np.sum(args['control']))
@@ -510,6 +753,7 @@ def main():
     plt.show()
     print(result)
 
+
 def main2():
 
     measurement = Measurement()
@@ -529,8 +773,8 @@ def main2():
     # data = np.tile(data,(3,1))
 
     # data = np.array(ttables['xor'] * 4)
-    data = measurement.get_tt(nary=2, periods=4, op='^')
-    replicate = 4
+    data = measurement.get_tt(nary=2, periods=3, op='^')
+    replicate = 6
     data = np.repeat(data, replicate, axis=0)
 
     # np.random.shuffle(data)
@@ -538,17 +782,21 @@ def main2():
     X = data[:, :-1]
     y = data[:, -1]
 
-    data = measurement.perturb_X(X, boost=6.0, var=0.00)
+    data = measurement.perturb_X(X, boost=8, var=0.00)
+
 
     # 3.05163959444126, 'c2': 2.474871658179593, 'c1': 2.3949911463760887
-    # data = np.hstack((data, np.array([2.39 * np.ones_like(data[:, 0])]).T))
-    #
-    # data = np.hstack((data,np.array([2.47*np.ones_like(data[:,0])]).T))
-    #
-    # data = np.hstack((data, np.array([3.05 * np.ones_like(data[:, 0])]).T))
+    # data = np.hstack((data, np.array([0.39 * np.ones_like(data[:, 0])]).T))
+    # data = np.hstack((data, np.array([0.39 * np.ones_like(data[:, 0])]).T))
+    # data = np.hstack((data, np.array([0.39 * np.ones_like(data[:, 0])]).T))
 
-    out = measurement.multi_measurement(data,outchans=3,pulse_dur=.1,samps_pulse=100,duty=.5,signal_type='triang',peak_type='max')
+    # data = np.hstack((data, np.array([0.47*np.ones_like(data[:,0])]).T))
+    #
+    # data = np.hstack((data, np.array([0.05 * np.ones_like(data[:, 0])]).T))
 
+    out = measurement.multi_measurement(data,outchans=4,pulse_dur=.1,samps_pulse=30,duty=.5,signal_type='square',peak_type='last')
+
+    replicate=1
     yp = np.array(out['result'])[:, np.array(out['peaks'])[0, replicate-1::replicate]]
 
     result = np.hstack((yp.T, np.array([y[replicate-1::replicate]]).T))
@@ -556,6 +804,7 @@ def main2():
     print("Got score",plott.calculate_logreg_score(result))
 
     # plott.plot3d(result)
+    plott.plot3d_native(result)
     plott.pca_plotter(result)
 
     measurement.plot_result(out,replicate)
@@ -564,9 +813,33 @@ def main2():
         print("writing file")
         json.dump(out, f)
 
+def main_analog():
+    measurement = Measurement()
+    # data = 1 * np.array([[1., -1,.0],  # R
+    #                       [-1., 1,1],  # W
+    #                       [1., -1,.0],
+    #                       [-1., 0,.0],
+    #                       [0, 1.,1],  # R
+    #                       [0, -1.,.0],  # W
+    #                       [0, 1.,.5],
+    #                       [0, -1.,.0]
+    #                       ])  # R
+    # data = measurement.get_tt(nary=2, periods=3, op='^')
+
+    x=np.linspace(0,1,100)
+    data = 8*np.sin(2*np.pi*x*4).reshape((-1,1))
+    data = np.repeat(data,2,axis=1)
+
+    out = measurement.analog_measurement(data, outchans=4, freq=10)
+
+    measurement.plot_result(out, 1)
+
+    measurement.plot_hysteresis(results=out)
+
+
 
 def main_opt():
-    mul_space=[4.,6.,8.]
+    mul_space=[6.]
     space = {'control':[hp.uniform('c1',-8,8),hp.uniform('c2',-8,8),hp.uniform('c3',-8,8)],
              'params':{
                  'multiplier':hp.choice('m',mul_space)
@@ -576,7 +849,7 @@ def main_opt():
 
     measurement = Measurement()
 
-    best = fmin(measurement.opt_func,space,algo=tpe.suggest,max_evals=10,verbose=True)
+    best = fmin(measurement.opt_func,space,algo=tpe.suggest,max_evals=20,verbose=True)
     # best = fmin(dummy_f, space, algo=tpe.suggest, max_evals=20, verbose=True)
 
     bvals={'control': [best['c1'], best['c2'], best['c3']],
@@ -590,6 +863,53 @@ def main_opt():
 
     print(best)
 
+def playground():
+
+    meas = Measurement()
+
+    data = meas.get_tt(nary=2, periods=3, op='^')
+    replicate = 3
+    data = np.repeat(data, replicate, axis=0)
+
+    # np.random.shuffle(data)
+
+    X = data[:, :-1]
+    y = data[:, -1]
+
+    # X[:,0] = np.abs(X[:,0])
+    # X[:,1] = -np.abs(X[:,1])
+
+    data = meas.perturb_X(X, boost=9, var=0.00)
+
+    # indata = meas.mask_data(data=data,mask=[3,4])
+
+
+
+    # contdata = meas.mask_data(data=contdata, mask=[7, 8])
+
+    # print(data)
+
+    # 3.05, 'c2': 2.47, 'c1': 2.39
+    data = np.hstack((data, np.array([5.39 * np.ones_like(data[:, 0])]).T))
+
+    out = meas.multi_measurement(data, pulse_dur=.1, samps_pulse=80, duty=.5, signal_type='square',
+                                        peak_type='last',inmask=[4,5],contmask=[6],outchans=[1,2,3,4,5,6])
+    replicate = 1
+    yp = np.array(out['result'])[:, np.array(out['peaks'])[0, replicate - 1::replicate]]
+
+    result = np.hstack((yp.T, np.array([y[replicate - 1::replicate]]).T))
+
+    print("Got score", plott.calculate_logreg_score(result))
+
+    # plott.plot3d(result)
+    plott.plot3d_native(result)
+    plott.pca_plotter(result)
+
+    meas.plot_result(out, replicate)
+
+
 if __name__ == "__main__":
+    # main_analog()
     # main2()
-    main_opt()
+    # main_opt()
+    playground()
