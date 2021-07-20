@@ -140,7 +140,7 @@ if __name__ == '__main__':
     """"""
     # device = visa.instrument(device_resource, timeout=5000, chunk_size=40 * 1024)
     rm = visa.ResourceManager()
-    device = rm.open_resource(device_resource,open_timeout=5000)
+    device = rm.open_resource(device_resource,open_timeout=4000)
 
     print(device.query('*IDN?'))
 
@@ -155,13 +155,33 @@ if __name__ == '__main__':
     # dl.measure_for_time(1000,10)
 
     srate=4000
-    Thread(target=dl.measure_for_time,args=[srate,32.]).start()
+    Thread(target=dl.measure_for_time,args=[srate,5]).start()
 
     # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=2, inv=False, chan='C1', dly=0)
     # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=True, chan='C1', dly=0)
-    basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=False, chan='C1', dly=0)
-    basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=True, chan='C1', dly=0)
-    basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=False, chan='C1', dly=0)
+
+    # basic_wave(device, 'PULSE', width=0.1, amp=5., offset=2.5, freq=5, hold=5, inv=True, chan='C1', dly=0)
+    # basic_wave(device, 'PULSE', width=0.1, amp=5., offset=2.5, freq=5, hold=5, inv=False, chan='C1', dly=0)
+    # basic_wave(device, 'PULSE', width=0.01, amp=4., offset=2., freq=2, hold=5,  inv=False, chan='C1', dly=0)
+    # basic_wave(device, 'PULSE', width=0.01, amp=4., offset=2., freq=25, hold=1, inv=False, chan='C1', dly=0)
+    # basic_wave(device, 'PULSE', width=0.01, amp=4., offset=2., freq=1, hold=10, inv=False, chan='C1', dly=0)
+    # basic_wave(device, 'PULSE', width=0.01, amp=4., offset=2., freq=10, hold=2, inv=False, chan='C1', dly=0)
+
+    basic_wave(device, 'PULSE', width=0.01, amp=2., offset=1, freq=20, hold=1, inv=False, chan='C1', dly=0)
+    basic_wave(device, 'PULSE', width=0.01, amp=2., offset=1, freq=30, hold=1, inv=True, chan='C1', dly=0)
+    basic_wave(device, 'PULSE', width=0.01, amp=2., offset=1, freq=40, hold=1, inv=False, chan='C1', dly=0)
+    basic_wave(device, 'PULSE', width=0.01, amp=2., offset=1, freq=50, hold=1, inv=True, chan='C1', dly=0)
+
+    # #Wei Lu's Protocol
+    # basic_wave(device, 'PULSE', width=0.001, amp=2, offset=1, freq=40, hold=10, inv=False, chan='C1', dly=0)
+    # basic_wave(device, 'PULSE', width=0.001, amp=2, offset=1, freq=10, hold=10, inv=False, chan='C1', dly=0)
+    # basic_wave(device, 'PULSE', width=0.001, amp=2, offset=1, freq=2, hold=10, inv=False, chan='C1', dly=0)
+    # basic_wave(device, 'PULSE', width=0.001, amp=2, offset=1, freq=25, hold=10, inv=False, chan='C1', dly=0)
+    # basic_wave(device, 'PULSE', width=0.001, amp=2, offset=1, freq=1, hold=10, inv=False, chan='C1', dly=0)
+    # basic_wave(device, 'PULSE', width=0.001, amp=2, offset=1, freq=10, hold=10, inv=False, chan='C1', dly=0)
+
+    # basic_wave(device, 'SQUARE', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=True, chan='C1', dly=0)
+    # basic_wave(device, 'SQUARE', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=False, chan='C1', dly=0)
     # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=True, chan='C1', dly=0)
     # time.sleep(10)
     # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=2.0, freq=5, hold=10, inv=False, chan='C1', dly=0)
@@ -186,7 +206,7 @@ if __name__ == '__main__':
     # basic_wave(device, 'RAMP', width=0.001, amp=4, offset=0.0, freq=5, hold=4, inv=True, chan='C1', dly=0)
     # basic_wave(device, 'PULSE', width=0.5, amp=5, offset=2.5, freq=0.0001, hold=3, inv=True,chan='C1',dly=0)
 
-    # basic_wave(device, 'PULSE', width=0.003, amp=4, offset=2, freq=100, hold=0.5, inv=False)
+    # basic_wave(device, 'PULSE', width=0.1, amp=2, offset=1., freq=100, hold=10.5, inv=False)
     # basic_wave(device, 'PULSE', width=0.0015, amp=2, offset=1, freq=100, hold=0.5, inv=True)
     # basic_wave(device, 'PULSE', width=0.003, amp=4, offset=2, freq=100, hold=0.5, inv=False)
     # basic_wave(device, 'SINE', width=0.003, amp=4, offset=0, freq=10, hold=1, inv=False)
@@ -208,9 +228,11 @@ if __name__ == '__main__':
     # y=y/1e5*1e6
     x=df[1].as_matrix()
     lth = len(x)
-    t = np.arange(lth)#/srate
+    t = np.arange(lth)/srate
     axarr[0].plot(t, x)
+    axarr[0].set_title('input')
     axarr[1].plot(t, y)
+    axarr[1].set_title('output')
     plt.show()
 
     # plt.figure(figsize=(10,5))

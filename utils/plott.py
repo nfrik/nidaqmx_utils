@@ -14,6 +14,8 @@ from sklearn.svm import SVC
 from sklearn.preprocessing import scale, normalize, minmax_scale, StandardScaler
 import datetime
 import seaborn as sns
+from sklearn.linear_model import LogisticRegressionCV
+
 sns.set(style="white")
 
 def calculate_logreg_score(inmat):
@@ -27,7 +29,8 @@ def calculate_logreg_score(inmat):
 
     y = np.array(inmat)[:, -1]
 
-    logreg = linear_model.LogisticRegression(C=1., verbose=False, tol=1e-8, fit_intercept=True)
+#     logreg = linear_model.LogisticRegression(C=1., verbose=False, tol=1e-2, fit_intercept=True)
+    logreg = LogisticRegressionCV(Cs=[1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3],fit_intercept=True).fit(X, y)
     logreg.fit(X, y)
 
     var = logreg.score(X, y)
@@ -36,17 +39,17 @@ def calculate_logreg_score(inmat):
 
 
 def draw_linear_decision_bound(ax, X, y):
-    clf = linear_model.LogisticRegression(fit_intercept=True).fit(X, y)
+
+    clf = LogisticRegressionCV(Cs=[1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3]).fit(X, y)
+    # clf = linear_model.LogisticRegression(fit_intercept=True).fit(X, y)
     xx, yy = np.mgrid[np.min(X[:, 0]):np.max(X[:, 0]):.01, np.min(X[:, 1]):np.max(X[:, 1]):.01]
     grid = np.c_[xx.ravel(), yy.ravel()]
     probs = clf.predict_proba(grid)[:, 1].reshape(xx.shape)
     ax.contour(xx, yy, probs, levels=[.5], cmap="Greys", vmin=0, vmax=.6)
 
-    # ax.scatter(X[:, 0], X[:, 1], c=y[:], s=50,
-    #            cmap="RdBu", vmin=-.2, vmax=1.2,
-    #            edgecolor="white", linewidth=1)
     ax.scatter(X[:, 0], X[:, 1], cmap="RdBu_r", vmin=-1.5, vmax=1.5, s=100, c=y[:], linewidth=1,
                edgecolor='white')
+
 
 def plot3d(inmat,inputcirc=None,title=""):
 
@@ -106,6 +109,34 @@ def plot3d(inmat,inputcirc=None,title=""):
     plt.savefig("aggregated.png")
     plt.show()
     return ax
+
+def plot3d_native(X_y,inputcirc=None,title=""):
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    #
+    # X = np.array(X_y)[:, :-1]
+    # y = np.array(X_y)[:, -1]
+
+
+    for cords in X_y:
+        ax.scatter(cords[0], cords[1], cords[2], s=100, c='r' if cords[-1] < 1. else 'b', marker='o' if cords[-1] < 1. else '^')
+
+    plt.show()
+
+def plot_line(y,savepath="",title="",xlabel="",ylabel=""):
+    fig = plt.figure()
+    fig.suptitle(title)
+
+    plt.plot(y,'-')
+
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+
+    if savepath!="":
+        plt.savefig(savepath)
+    else:
+        plt.show()
 
 def pca_plotter(input,title='',savepath=""):
     fig = plt.figure()

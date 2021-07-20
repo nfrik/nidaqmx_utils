@@ -509,7 +509,7 @@ class Measurement:
 
         for r, chan in zip(data, range(len(data))):
             # if chan != 1:
-            plt.plot(sig[0], r, label="out sig {}".format(chan))
+            plt.plot(sig[0], r, label=r"$v_{{out {}}}$".format(chan))
 
         plt.show()
 
@@ -531,23 +531,27 @@ class Measurement:
 
         for r, chan in zip(data, range(len(data))):
             # if chan != 1:
-            plt.plot(t, r, label="out sig {}".format(chan))
+            plt.plot(t, r, label=r"$v_{{out{}}}$".format(chan))
             try:
                 if draw_peaks:
-                    plt.plot(t[peaks[chan]],r[peaks[chan]], 'x', label="out sig {}".format(chan))
+                    plt.plot(t[peaks[chan]],r[peaks[chan]], 'x', label=r"$v_{{out{}}}$".format(chan))
             except:
                 pass
 
-        plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=5)
+        # plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=5)
+        plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), fancybox=True, shadow=True, ncol=1)
 
         plt.subplot(212)
         for s, chan in zip(sig, range(sig.shape[0])):
-            plt.plot(t, s, label="inp sig {}".format(chan))
+            plt.plot(t, s, label=r"$v_{{in{}}}$".format(chan))
 
-        plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=5)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Voltage (V)')
+        # plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=5)
+        plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), fancybox=True, shadow=True, ncol=1)
         # plt.show()
-
-        plt.tight_layout()
+        plt.subplots_adjust(right=0.8)
+        # plt.tight_layout()
         if savepath!="":
             a.savefig(savepath)
         else:
@@ -568,6 +572,7 @@ class Measurement:
                 pass
             plt.yticks(np.arange(1.2 * np.min(data[i]), 1.2 * np.max(data[i]), 3))
 
+        # plt.tight_layout()
         if savepath=="":
             plt.show()
 
@@ -707,7 +712,7 @@ class Measurement:
 
 
         # data = np.array(ttables['xor3'] * 4)
-        data = self.get_tt(nary=3, periods=2, op='^')
+        data = self.get_tt(nary=2, periods=3, op='^')
         replicate = 4
         data = np.repeat(data, replicate, axis=0)
 
@@ -718,14 +723,17 @@ class Measurement:
 
         for c in control:
             data = np.hstack((data, np.array([c * np.ones_like(data[:, 0])]).T))
-
+        # multi_measurement(self, bindata, pulse_dur=0.1, samps_pulse=1000, duty=0.5, signal_type='triangle',
+        #                   peak_type='max', inmask=[], contmask=[], outmask=[]):
         out = self.multi_measurement(data,
-                                     outmask=4,
-                                     pulse_dur=.1,
-                                     samps_pulse=50,
+                                     pulse_dur=.05,
+                                     samps_pulse=200,
                                      duty=.5,
-                                     signal_type='square',
-                                     peak_type='last')
+                                     inmask=[1,2],
+                                     contmask=[5,6,7],
+                                     outmask=[0,1,2],
+                                     signal_type='triang',
+                                     peak_type='max')
 
         yp = np.array(out['result'])[:, np.array(out['peaks'])[0, :]]
 
@@ -742,7 +750,7 @@ class Measurement:
                     os.makedirs(self.current_folder_name)
             plott.pca_plotter(result,title="Score {0:.2f} {1}".format(score,args['control']),savepath=os.path.join(self.current_folder_name,'pca_{}.png').format(self.file_index))
 
-            plott.plot_line(self.optim_score,title='Optimization Score Trend',savepath=os.path.join(self.current_folder_name,'score.png'))
+            plott.plot_line(self.optim_score,title='Optimization Score Trend',savepath=os.path.join(self.current_folder_name,'score.png'),xlabel='step',ylabel='score')
 
             np.save(os.path.join(self.current_folder_name,'result_{}.npy').format(self.file_index),result)
 
@@ -795,15 +803,15 @@ def main():
     # print(outvals2)
     # X=[[1,2,3],[-1,-2,-3],[7.23,7.24,-7.25]]
     measurement=Measurement()
-    data = np.array(ttables['xor'] * 10)
+    data = np.array(ttables['xor'] * 4)
     X = data[:, :-1]
     y = data[:, -1]
-    X = measurement.perturb_X(X, boost=5.0, var=0.00)
+    X = measurement.perturb_X(X, boost=5., var=0.00)   ##boost is the voltage input
     # n=10
     # # X=np.random.random((n,3))*3
     # X=np.ones((n,3))*5.002
     # y=np.ones(n)
-    result = measurement.nidaq_circuit_eval(X,y,inputids=[0,1],outputids=[0,1,2],eq_time=0.1,av_samps=5)
+    result = measurement.nidaq_circuit_eval(X,y,inputids=[1,2],outputids=[0,1,2,3],eq_time=0.5,av_samps=5)
     plott.plot3d(result)
     plott.pca_plotter(result)
     print(X)
@@ -851,7 +859,7 @@ def main2():
 
 
     # 3.05163959444126, 'c2': 2.474871658179593, 'c1': 2.3949911463760887
-    # data = np.hstack((data, np.array([0.39 * np.ones_like(data[:, 0])]).T))
+    data = np.hstack((data, np.array([0.39 * np.ones_like(data[:, 0])]).T))
     # data = np.hstack((data, np.array([0.39 * np.ones_like(data[:, 0])]).T))
     # data = np.hstack((data, np.array([0.39 * np.ones_like(data[:, 0])]).T))
 
@@ -859,7 +867,9 @@ def main2():
     #
     # data = np.hstack((data, np.array([0.05 * np.ones_like(data[:, 0])]).T))
 
-    out = measurement.multi_measurement(data, outmask=4, pulse_dur=.1, samps_pulse=30, duty=.5, signal_type='square', peak_type='last')
+    # multi_measurement(self, bindata, pulse_dur=0.1, samps_pulse=1000, duty=0.5, signal_type='triangle', peak_type='max',
+    #                   inmask=[], contmask=[], outmask=[]):
+    out = measurement.multi_measurement(data, pulse_dur=.1, samps_pulse=30, duty=.5, signal_type='square', peak_type='last',inmask=[1,2],contmask=[3],outmask=[2,3,4])
 
     replicate=1
     yp = np.array(out['result'])[:, np.array(out['peaks'])[0, replicate-1::replicate]]
@@ -891,15 +901,15 @@ def main_analog():
     #                       ])  # R
     # data = measurement.get_tt(nary=2, periods=3, op='^')
 
-    x=np.linspace(0,1,200)
-    data = np.zeros((x.shape[0],3))
-    data[:, 0] = 6*np.sin(2 * np.pi * x * 7- 2.2)
-    data[:, 1] = 4*np.sin(2 * np.pi * x * 7 -1.5)
-    data[:, 2] = 5*np.sin(2 * np.pi * x * 9 - 1)
+    x=np.linspace(0,1,800)
+    data = np.zeros((x.shape[0],1))
+    data[:, 0] = 1.*np.sin(2 * np.pi * x * 17 - 2.2)+0.1
+    # data[:, 1] = 4*np.sin(2 * np.pi * x * 7 -1.5)
+    # data[:, 2] = 5*np.sin(2 * np.pi * x * 9 - 1)
 
     # data = np.repeat(data,2,axis=1)
 
-    out = meas.analog_measurement(data, freq=50, outmask=[1,2,3,4,5,6,7], inmask=[5,6,7])
+    out = meas.analog_measurement(data, freq=200, outmask=[0,1,2,3,4,5,6,7], inmask=[1])
     meas.clear_all_output_chans()
 
     meas.plot_result(out, 1)
@@ -929,12 +939,12 @@ def main_analog_continuous():
 
     out = measurement.analog_continuous_measurement(data, freq=50,  inmask=[0], outmask=[0,1,2,3,4,5,6,7])
 
-    # measurement.plot_result(out, 1)
+    measurement.plot_result(out, 1)
     #
     # measurement.plot_hysteresis(results=out)
 
 def main_opt():
-    mul_space=[6.]
+    mul_space=[8.]
     space = {'control':[hp.uniform('c1',-8,8),hp.uniform('c2',-8,8),hp.uniform('c3',-8,8)],
              'params':{
                  'multiplier':hp.choice('m',mul_space)
@@ -944,7 +954,7 @@ def main_opt():
 
     measurement = Measurement()
 
-    best = fmin(measurement.opt_func,space,algo=tpe.suggest,max_evals=20,verbose=True)
+    best = fmin(measurement.opt_func,space,algo=tpe.suggest,max_evals=100,verbose=True)
     # best = fmin(dummy_f, space, algo=tpe.suggest, max_evals=20, verbose=True)
 
     bvals={'control': [best['c1'], best['c2'], best['c3']],
@@ -957,6 +967,7 @@ def main_opt():
     measurement.opt_func(bvals)
 
     print(best)
+
 
 def playground():
 
@@ -1016,9 +1027,10 @@ def playground():
 
 
 if __name__ == "__main__":
-    main_analog()
+    # main_analog()
+
     # main_analog_continuous()
     # main2()
     # main_opt()
     # playground()
-    # main()
+    main()
